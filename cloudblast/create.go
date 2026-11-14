@@ -227,10 +227,10 @@ func (d *Driver) provisionNode(ip string, ud *UserData) error {
 
 	cloudInitTimeout := d.cloudInitTimeout()
 	d.logf("waiting for cloud-init (timeout=%s)", cloudInitTimeout)
-	progress := func(elapsed time.Duration) {
-		d.logf("waiting for cloud-init, elapsed=%s", elapsed.Round(time.Second))
+	progress := func(elapsed time.Duration, attempt int, status string) {
+		d.logf("waiting for cloud-init, elapsed=%s attempt=%d status=%s", elapsed.Round(time.Second), attempt, status)
 	}
-	if err := client.WaitCloudInit(context.Background(), cloudInitTimeout, progress); err != nil {
+	if err := client.WaitCloudInit(context.Background(), cfg, cloudInitTimeout, progress); err != nil {
 		return err
 	}
 

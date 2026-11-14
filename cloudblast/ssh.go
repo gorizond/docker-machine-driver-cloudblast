@@ -36,6 +36,8 @@ type SSHConfig struct {
 // SSHClient is a small command runner over one SSH connection.
 type SSHClient struct {
 	client *ssh.Client
+	// runFunc is a test seam; production code uses client.
+	runFunc func(context.Context, string) (string, error)
 }
 
 // LoadPrivateKey reads an unencrypted OpenSSH/PEM private key.
@@ -154,6 +156,9 @@ func sshFailureReason(err error) string {
 
 // Run executes a command and returns combined stdout/stderr. Output is masked.
 func (c *SSHClient) Run(ctx context.Context, cmd string) (string, error) {
+	if c != nil && c.runFunc != nil {
+		return c.runFunc(ctx, cmd)
+	}
 	return c.run(ctx, cmd, nil)
 }
 
@@ -171,63 +176,6 @@ func (c *SSHClient) WriteFile(ctx context.Context, path string, content []byte, 
 	cmd := "mkdir -p " + shellQuote(dir) + " && cat > " + shellQuote(path) + " && chmod " + mode + " " + shellQuote(path)
 	if _, err := c.run(ctx, cmd, bytes.NewReader(content)); err != nil {
 		return fmt.Errorf("cloudblast ssh: write %s: %w", path, err)
-	}
-	return nil
-}
-
-// RunWithProgress runs a command and calls progress every interval while it is
-// executing. Used to log long cloud-init waits without leaking command output.
-func (c *SSHClient) RunWithProgress(ctx context.Context, cmd string, interval time.Duration, progress func(elapsed time.Duration)) (string, error) {
-	if progress == nil || interval <= 0 {
-		return c.Run(ctx, cmd)
-	}
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		start := time.Now()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				progress(time.Since(start))
-			}
-		}
-	}()
-	out, err := c.Run(ctx, cmd)
-	close(done)
-	return out, err
-}
-
-// WaitCloudInit waits for the provider cloud-init to finish, so package
-// installation does not race with dpkg locks. If the boot-finished marker
-// already exists, cloud-init is considered complete. It never runs
-// "cloud-init clean" or "cloud-init init".
-func (c *SSHClient) WaitCloudInit(ctx context.Context, timeout time.Duration, progress func(elapsed time.Duration)) error {
-	if timeout <= 0 {
-		timeout = cloudInitMinTimeout
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	marker, err := c.Run(waitCtx, "test -f /var/lib/cloud/instance/boot-finished && echo yes || echo no")
-	if err != nil {
-		return fmt.Errorf("cloudblast: check cloud-init boot-finished: %w", err)
-	}
-	if strings.Contains(marker, "yes") {
-		log.Debugf("cloudblast ssh: boot-finished marker present, cloud-init already done")
-		return nil
-	}
-
-	out, err := c.RunWithProgress(waitCtx, "cloud-init status --wait", cloudInitProgressInterval, progress)
-	if err != nil {
-		return fmt.Errorf("cloudblast: cloud-init did not finish: %w", err)
-	}
-	if strings.Contains(out, "status: error") || strings.Contains(out, "status: degraded") {
-		return fmt.Errorf("cloudblast: cloud-init finished with an error: %s", strings.TrimSpace(out))
 	}
 	return nil
 }
