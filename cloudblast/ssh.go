@@ -234,3 +234,7 @@ func truncateOutput(s string) string {
 	}
 	return s[:limit] + "…"
 }
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}

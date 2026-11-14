@@ -2,9 +2,7 @@ package cloudblast
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 )
@@ -13,7 +11,6 @@ import (
 // SSH key when no other server uses it. A missing server is success.
 func (d *Driver) Remove() error {
 	if strings.TrimSpace(d.VMUUID) == "" {
-		d.cleanupUserDataFile()
 		return nil
 	}
 
@@ -38,7 +35,6 @@ func (d *Driver) Remove() error {
 	if d.BaseDriver != nil {
 		d.BaseDriver.IPAddress = ""
 	}
-	d.cleanupUserDataFile()
 	return nil
 }
 
@@ -91,14 +87,4 @@ func (d *Driver) cleanupSSHKey(ctx context.Context, api *Client) {
 		return
 	}
 	d.SSHKeyID = 0
-}
-
-func (d *Driver) cleanupUserDataFile() {
-	if strings.TrimSpace(d.UserDataTmpPath) == "" {
-		return
-	}
-	if err := os.Remove(d.UserDataTmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		d.debugf("remove temp user-data %s: %v", d.UserDataTmpPath, err)
-	}
-	d.UserDataTmpPath = ""
 }

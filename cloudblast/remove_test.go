@@ -2,7 +2,6 @@ package cloudblast
 
 import (
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -72,8 +71,5 @@ func TestRemoveAlreadyAbsentDeletesUnusedKey(t *testing.T) {
 	}
 	if d.VMUUID != "" || d.SSHKeyID != 0 {
 		t.Fatalf("state not cleared: uuid=%q key=%d", d.VMUUID, d.SSHKeyID)
-	}
-	if strings.TrimSpace(d.UserDataTmpPath) != "" {
-		t.Fatalf("UserDataTmpPath = %q, want empty", d.UserDataTmpPath)
 	}
 }

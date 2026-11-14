@@ -11,9 +11,10 @@ import (
 	"github.com/docker/machine/libmachine/mcnflag"
 )
 
-// GetCreateFlags registers the driver flags. The "cloudblast-user-data" flag is
-// mandatory for Rancher: it detects the substring "user-data" and from then on
-// merges install.sh into the cloud-config delivered by this driver.
+// GetCreateFlags registers the driver flags. Deliberately no flag name contains
+// "user-data", "userdata", "custom-data" or "cloud-config": Rancher must not
+// switch to the in-driver user-data path, so it uses WithCustomScript instead.
+// --cloudblast-post-boot-script is a separate optional hook.
 func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 	return []mcnflag.Flag{
 		mcnflag.StringFlag{
@@ -48,9 +49,9 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			EnvVar: "CLOUDBLAST_TEMPLATE_SLUG",
 		},
 		mcnflag.StringFlag{
-			Name:   "cloudblast-user-data",
-			Usage:  "Path to merged cloud-config or inline cloud-config",
-			EnvVar: "CLOUDBLAST_USER_DATA",
+			Name:   "cloudblast-post-boot-script",
+			Usage:  "Optional script to run over SSH after the server is ready (path, @path or inline)",
+			EnvVar: "CLOUDBLAST_POST_BOOT_SCRIPT",
 		},
 		mcnflag.StringFlag{
 			Name:   "cloudblast-ssh-user",
@@ -91,7 +92,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.APIBaseURL = stringOpt(opts, "cloudblast-base-url", "CLOUDBLAST_API_URL", DefaultAPIBaseURL)
 	d.APIInsecure = boolOpt(opts, "cloudblast-insecure", "CLOUDBLAST_INSECURE")
 	d.TemplateSlug = stringOpt(opts, "cloudblast-template-slug", "CLOUDBLAST_TEMPLATE_SLUG", "")
-	d.UserDataFlag = stringOpt(opts, "cloudblast-user-data", "CLOUDBLAST_USER_DATA", "")
+	d.PostBootScript = stringOpt(opts, "cloudblast-post-boot-script", "CLOUDBLAST_POST_BOOT_SCRIPT", "")
 	d.HostnamePrefix = stringOpt(opts, "cloudblast-hostname-prefix", "CLOUDBLAST_HOSTNAME_PREFIX", defaultHostnamePrefix)
 	d.KeepIPs = boolOpt(opts, "cloudblast-keep-ips", "CLOUDBLAST_KEEP_IPS")
 	d.SSHUser = stringOpt(opts, "cloudblast-ssh-user", "CLOUDBLAST_SSH_USER", defaultSSHUser)

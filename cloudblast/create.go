@@ -12,11 +12,21 @@ import (
 	machinessh "github.com/docker/machine/libmachine/ssh"
 )
 
-// Create provisions a CloudBlast server and applies the merged cloud-config.
-// Any failure after the server exists triggers a compensating delete.
+// Create provisions a CloudBlast server. Rancher runs its own system-agent
+// install over SSH (WithCustomScript) after Create returns; only an optional
+// post-boot script is executed here. Any failure after the server exists
+// triggers a compensating delete.
 func (d *Driver) Create() (err error) {
 	if err := d.PreCreateCheck(); err != nil {
 		return err
+	}
+
+	script, err := readPostBootScript(d.PostBootScript)
+	if err != nil {
+		return err
+	}
+	if len(script) == 0 && strings.TrimSpace(d.PostBootScript) != "" {
+		d.logf("post-boot script is empty; skipping")
 	}
 
 	keyPath := d.GetSSHKeyPath()
@@ -30,15 +40,6 @@ func (d *Driver) Create() (err error) {
 	if err != nil {
 		return fmt.Errorf("cloudblast: read SSH public key: %w", err)
 	}
-
-	ud, err := LoadUserData(d.UserDataFlag)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = ud.Cleanup() }()
-	d.UserDataSHA256 = ud.SHA256
-	d.UserDataTmpPath = ud.TmpPath
-	d.logUserDataSummary(ud)
 
 	ctx, cancel := context.WithTimeout(context.Background(), d.readyTimeout())
 	defer cancel()
@@ -69,7 +70,7 @@ func (d *Driver) Create() (err error) {
 		return err
 	}
 	d.VMUUID = server.UUID
-	d.logf("server ready to provision uuid=%s hostname=%s", server.UUID, hostname)
+	d.logf("server ready uuid=%s hostname=%s", server.UUID, hostname)
 
 	defer func() {
 		if err == nil {
@@ -89,11 +90,12 @@ func (d *Driver) Create() (err error) {
 	}
 	d.BaseDriver.IPAddress = creds.IPv4
 
-	desiredHostname := d.desiredHostname(ud, server.Hostname)
-	if err := d.provisionNode(creds.IPv4, ud, desiredHostname); err != nil {
-		return err
+	if len(script) > 0 {
+		if err := d.runPostBootScript(creds.IPv4, script); err != nil {
+			return err
+		}
 	}
-	d.logf("server %s provisioned with modules %v", server.UUID, d.AppliedModules)
+	d.logf("server %s ready; Rancher will install the system-agent via WithCustomScript", server.UUID)
 	return nil
 }
 

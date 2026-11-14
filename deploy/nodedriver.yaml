@@ -5,7 +5,6 @@ metadata:
   annotations:
     publicCredentialFields: baseUrl,insecure
     privateCredentialFields: token
-    nodedriver.cattle.io/file-to-field-aliases: "userData:userData"
 spec:
   active: true
   addCloudCredential: true

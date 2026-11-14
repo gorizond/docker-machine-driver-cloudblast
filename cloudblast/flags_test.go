@@ -1,7 +1,6 @@
 package cloudblast
 
 import (
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,7 +40,7 @@ func (f fakeOptions) Bool(key string) bool {
 var cloudblastEnv = []string{
 	"CLOUDBLAST_API_TOKEN", "CLOUDBLAST_API_URL", "CLOUDBLAST_INSECURE",
 	"CLOUDBLAST_LOCATION_ID", "CLOUDBLAST_PLAN_ID", "CLOUDBLAST_TEMPLATE_SLUG",
-	"CLOUDBLAST_USER_DATA", "CLOUDBLAST_SSH_USER", "CLOUDBLAST_SSH_PORT",
+	"CLOUDBLAST_POST_BOOT_SCRIPT", "CLOUDBLAST_SSH_USER", "CLOUDBLAST_SSH_PORT",
 	"CLOUDBLAST_WAIT_TIMEOUT", "CLOUDBLAST_KEEP_IPS", "CLOUDBLAST_HOSTNAME_PREFIX",
 }
 
@@ -81,7 +80,7 @@ func TestSetConfigFromFlagsEnvFallback(t *testing.T) {
 	t.Setenv("CLOUDBLAST_LOCATION_ID", "5")
 	t.Setenv("CLOUDBLAST_PLAN_ID", "19")
 	t.Setenv("CLOUDBLAST_TEMPLATE_SLUG", "ubuntu-24.04")
-	t.Setenv("CLOUDBLAST_USER_DATA", "#cloud-config\nruncmd: [echo hi]")
+	t.Setenv("CLOUDBLAST_POST_BOOT_SCRIPT", "echo post-boot")
 	t.Setenv("CLOUDBLAST_WAIT_TIMEOUT", "900")
 	t.Setenv("CLOUDBLAST_KEEP_IPS", "true")
 	t.Setenv("CLOUDBLAST_HOSTNAME_PREFIX", "env-")
@@ -95,6 +94,9 @@ func TestSetConfigFromFlagsEnvFallback(t *testing.T) {
 	}
 	if d.TemplateSlug != "ubuntu-24.04" || d.WaitTimeoutSecs != 900 {
 		t.Fatalf("env values not applied: %+v", d)
+	}
+	if d.PostBootScript != "echo post-boot" {
+		t.Fatalf("post-boot script = %q", d.PostBootScript)
 	}
 	if !d.KeepIPs || d.HostnamePrefix != "env-" {
 		t.Fatalf("env bool/string not applied: %+v", d)
@@ -115,15 +117,19 @@ func TestCreateFlagsContract(t *testing.T) {
 	required := []string{
 		"cloudblast-token", "cloudblast-base-url", "cloudblast-insecure",
 		"cloudblast-location-id", "cloudblast-plan-id", "cloudblast-template-slug",
-		"cloudblast-user-data", "cloudblast-ssh-user", "cloudblast-ssh-port",
+		"cloudblast-post-boot-script", "cloudblast-ssh-user", "cloudblast-ssh-port",
 		"cloudblast-wait-timeout", "cloudblast-keep-ips", "cloudblast-hostname-prefix",
 	}
+	forbidden := []string{"user-data", "userdata", "custom-data", "cloud-config"}
 	have := map[string]bool{}
-	userDataFlag := false
 	for _, f := range d.GetCreateFlags() {
-		have[f.String()] = true
-		if strings.Contains(f.String(), "user-data") {
-			userDataFlag = true
+		name := f.String()
+		have[name] = true
+		lower := strings.ToLower(name)
+		for _, bad := range forbidden {
+			if strings.Contains(lower, bad) {
+				t.Errorf("flag %q must not match Rancher user-data detection (%q)", name, bad)
+			}
 		}
 	}
 	for _, name := range required {
@@ -131,22 +137,9 @@ func TestCreateFlagsContract(t *testing.T) {
 			t.Errorf("missing flag %q", name)
 		}
 	}
-	if !userDataFlag {
-		t.Fatal(`flag containing "user-data" is required for Rancher merge detection`)
-	}
 }
 
 func TestPreCreateCheck(t *testing.T) {
-	validUserData := func(t *testing.T) string {
-		t.Helper()
-		path := t.TempDir() + "/cloud-config.yaml"
-		content := "#cloud-config\nruncmd:\n  - echo hi\n"
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-
 	cases := []struct {
 		name    string
 		mutate  func(*Driver)
@@ -160,10 +153,6 @@ func TestPreCreateCheck(t *testing.T) {
 		{name: "timeout too small", mutate: func(d *Driver) { d.WaitTimeoutSecs = 30 }, wantErr: "between 60 and 3600"},
 		{name: "timeout too big", mutate: func(d *Driver) { d.WaitTimeoutSecs = 3601 }, wantErr: "between 60 and 3600"},
 		{name: "bad base url", mutate: func(d *Driver) { d.APIBaseURL = "console.cloudblast.io" }, wantErr: "invalid cloudblast-base-url"},
-		{name: "no user data", mutate: func(d *Driver) { d.UserDataFlag = "" }, wantErr: "cloudblast-user-data is required"},
-		{name: "rejected user data key", mutate: func(d *Driver) {
-			d.UserDataFlag = "#cloud-config\nnetwork: {}\n"
-		}, wantErr: `key "network" is not supported`},
 	}
 
 	for _, tc := range cases {
@@ -175,7 +164,6 @@ func TestPreCreateCheck(t *testing.T) {
 			d.PlanID = 19
 			d.TemplateSlug = "ubuntu-24.04"
 			d.WaitTimeoutSecs = 600
-			d.UserDataFlag = validUserData(t)
 			tc.mutate(d)
 
 			err := d.PreCreateCheck()

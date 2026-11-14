@@ -23,25 +23,24 @@ const (
 	maxWaitTimeoutSecs     = 3600
 	defaultHostnamePrefix  = "cb-"
 
-	defaultPollInterval       = 5 * time.Second
-	compensationTimeout       = 3 * time.Minute
-	removalTimeout            = 5 * time.Minute
-	apiOperationTimeout       = 2 * time.Minute
-	keyCleanupTimeout         = 30 * time.Second
-	sshHandshakeMinTimeout    = 10 * time.Minute
-	cloudInitMinTimeout       = 15 * time.Minute
-	cloudConfigApplyTimeout   = 5 * time.Minute
-	hostnameApplyTimeout      = 2 * time.Minute
-	cloudInitProgressInterval = 30 * time.Second
+	defaultPollInterval     = 5 * time.Second
+	compensationTimeout     = 3 * time.Minute
+	removalTimeout          = 5 * time.Minute
+	apiOperationTimeout     = 2 * time.Minute
+	keyCleanupTimeout       = 30 * time.Second
+	sshHandshakeMinTimeout  = 10 * time.Minute
+	postBootScriptTimeout   = 10 * time.Minute
+	bootFinishedWaitTimeout = 5 * time.Minute
 )
 
 // Driver is the CloudBlast node driver state. Fields are persisted in the
-// docker-machine store; Token and UserDataFlag are deliberately not persisted.
+// docker-machine store; Token and PostBootScript (which may contain secrets)
+// are deliberately not persisted.
 type Driver struct {
 	*drivers.BaseDriver
 
-	Token        string `json:"-"`
-	UserDataFlag string `json:"-"`
+	Token          string `json:"-"`
+	PostBootScript string `json:"-"`
 
 	APIBaseURL   string `json:"apiBaseUrl,omitempty"`
 	APIInsecure  bool   `json:"apiInsecure,omitempty"`
@@ -49,15 +48,12 @@ type Driver struct {
 	PlanID       int    `json:"planId,omitempty"`
 	TemplateSlug string `json:"templateSlug,omitempty"`
 
-	VMUUID            string   `json:"vmUuid,omitempty"`
-	SSHKeyID          int      `json:"sshKeyId,omitempty"`
-	SSHKeyFingerprint string   `json:"sshKeyFingerprint,omitempty"`
-	UserDataSHA256    string   `json:"userDataSha256,omitempty"`
-	UserDataTmpPath   string   `json:"userDataTmpPath,omitempty"`
-	AppliedModules    []string `json:"appliedModules,omitempty"`
-	WaitTimeoutSecs   int      `json:"waitTimeoutSecs,omitempty"`
-	KeepIPs           bool     `json:"keepIps,omitempty"`
-	HostnamePrefix    string   `json:"hostnamePrefix,omitempty"`
+	VMUUID            string `json:"vmUuid,omitempty"`
+	SSHKeyID          int    `json:"sshKeyId,omitempty"`
+	SSHKeyFingerprint string `json:"sshKeyFingerprint,omitempty"`
+	WaitTimeoutSecs   int    `json:"waitTimeoutSecs,omitempty"`
+	KeepIPs           bool   `json:"keepIps,omitempty"`
+	HostnamePrefix    string `json:"hostnamePrefix,omitempty"`
 
 	// test seams; never persisted
 	httpClient   *http.Client  `json:"-"`
@@ -109,15 +105,7 @@ func (d *Driver) PreCreateCheck() error {
 	if err := validateBaseURL(d.APIBaseURL); err != nil {
 		return err
 	}
-	if strings.TrimSpace(d.UserDataFlag) == "" {
-		return errors.New("cloudblast-user-data is required")
-	}
-	ud, err := LoadUserData(d.UserDataFlag)
-	if err != nil {
-		return err
-	}
-	d.logUserDataSummary(ud)
-	return ud.Cleanup()
+	return nil
 }
 
 // GetSSHHostname returns the address used by docker-machine for SSH.

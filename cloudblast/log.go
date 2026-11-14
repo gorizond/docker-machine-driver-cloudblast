@@ -1,8 +1,6 @@
 package cloudblast
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -16,7 +14,7 @@ var (
 	passwordRE    = regexp.MustCompile(`(?i)((?:root_)?password\s*[=:]\s*)["']?[^\s"',}]+`)
 )
 
-// logf writes a structured driver log line. It never receives user-data content.
+// logf writes a structured driver log line. It never receives script content.
 func (d *Driver) logf(format string, args ...any) {
 	log.Infof("%s%s", d.logPrefix(), d.maskDriverSecrets(fmt.Sprintf(format, args...)))
 }
@@ -42,14 +40,6 @@ func (d *Driver) logFields() []any {
 	return []any{name, uuid}
 }
 
-// logUserDataSummary records only the digest and size, never the content.
-func (d *Driver) logUserDataSummary(ud *UserData) {
-	if ud == nil {
-		return
-	}
-	d.debugf("user-data loaded sha256=%s bytes=%d", ud.SHA256, len(ud.Raw))
-}
-
 // maskSecrets redacts tokens, passwords and CATTLE_TOKEN values from free-form
 // text before it reaches logs or errors.
 func maskSecrets(s string) string {
@@ -60,13 +50,6 @@ func maskSecrets(s string) string {
 	masked = cattleTokenRE.ReplaceAllString(masked, "${1}***")
 	masked = passwordRE.ReplaceAllString(masked, "${1}***")
 	return masked
-}
-
-// maskUserData replaces cloud-config content with a short digest marker. Use it
-// whenever a user-data value would otherwise be interpolated into a message.
-func maskUserData(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return "<user-data sha256=" + hex.EncodeToString(sum[:6]) + ">"
 }
 
 // maskDriverSecrets additionally replaces the configured API token.
