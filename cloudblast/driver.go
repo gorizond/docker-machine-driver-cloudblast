@@ -34,12 +34,13 @@ const (
 )
 
 // Driver is the CloudBlast node driver state. Fields are persisted in the
-// docker-machine store; Token and PostBootScript (which may contain secrets)
-// are deliberately not persisted.
+// docker-machine store / Rancher machine state Secret (not in Git). Token is
+// persisted so lifecycle jobs (Remove/GetState/Start/Stop) can authenticate;
+// PostBootScript may contain secrets and is deliberately not persisted.
 type Driver struct {
 	*drivers.BaseDriver
 
-	Token          string `json:"-"`
+	Token          string `json:"token,omitempty"`
 	PostBootScript string `json:"-"`
 
 	APIBaseURL   string `json:"apiBaseUrl,omitempty"`
