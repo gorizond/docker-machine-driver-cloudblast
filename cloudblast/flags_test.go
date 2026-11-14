@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/docker/machine/libmachine/state"
 )
 
 type fakeOptions map[string]any
@@ -190,23 +192,21 @@ func TestPreCreateCheck(t *testing.T) {
 	}
 }
 
-func TestDriverNameAndPhase2Errors(t *testing.T) {
+func TestDriverNameAndCachedAddress(t *testing.T) {
 	d := NewDriver("m", t.TempDir())
 	if d.DriverName() != "cloudblast" {
 		t.Fatalf("DriverName = %q", d.DriverName())
 	}
-	if err := d.Create(); !strings.Contains(err.Error(), "phase 2") {
-		t.Fatalf("Create error = %v", err)
-	}
-	if _, err := d.GetState(); err == nil {
-		t.Fatal("GetState must be unimplemented in phase 2")
-	}
 	if _, err := d.GetIP(); err == nil {
-		t.Fatal("GetIP without an address must fail")
+		t.Fatal("GetIP without a server must fail")
 	}
 	d.BaseDriver.IPAddress = "203.0.113.10"
 	url, err := d.GetURL()
 	if err != nil || url != "tcp://203.0.113.10:2376" {
 		t.Fatalf("GetURL = %q, %v", url, err)
+	}
+	got, err := d.GetState()
+	if err != nil || got != state.None {
+		t.Fatalf("GetState without server = %v, %v; want None", got, err)
 	}
 }

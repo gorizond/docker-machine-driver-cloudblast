@@ -1,9 +1,12 @@
 package cloudblast
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/docker/machine/libmachine/drivers"
 	"github.com/docker/machine/libmachine/state"
@@ -19,10 +22,13 @@ const (
 	minWaitTimeoutSecs     = 60
 	maxWaitTimeoutSecs     = 3600
 	defaultHostnamePrefix  = "cb-"
-)
 
-// ErrPhase2NotImplemented marks lifecycle methods delivered by US1/US3.
-var ErrPhase2NotImplemented = errors.New("cloudblast: not implemented in phase 2")
+	defaultPollInterval = 5 * time.Second
+	compensationTimeout = 3 * time.Minute
+	removalTimeout      = 5 * time.Minute
+	apiOperationTimeout = 2 * time.Minute
+	keyCleanupTimeout   = 30 * time.Second
+)
 
 // Driver is the CloudBlast node driver state. Fields are persisted in the
 // docker-machine store; Token and UserDataFlag are deliberately not persisted.
@@ -47,6 +53,10 @@ type Driver struct {
 	WaitTimeoutSecs   int      `json:"waitTimeoutSecs,omitempty"`
 	KeepIPs           bool     `json:"keepIps,omitempty"`
 	HostnamePrefix    string   `json:"hostnamePrefix,omitempty"`
+
+	// test seams; never persisted
+	httpClient   *http.Client  `json:"-"`
+	pollInterval time.Duration `json:"-"`
 }
 
 var _ drivers.Driver = (*Driver)(nil)
@@ -110,12 +120,26 @@ func (d *Driver) GetSSHHostname() (string, error) {
 	return d.GetIP()
 }
 
-// GetIP returns the cached server IPv4 address.
+// GetIP returns the server IPv4 address from credentials.ipv4.
 func (d *Driver) GetIP() (string, error) {
 	if d.BaseDriver != nil && strings.TrimSpace(d.BaseDriver.IPAddress) != "" {
 		return d.BaseDriver.IPAddress, nil
 	}
-	return "", notImplemented("GetIP")
+	if strings.TrimSpace(d.VMUUID) == "" {
+		return "", errors.New("cloudblast: machine has no server yet")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiOperationTimeout)
+	defer cancel()
+
+	creds, err := d.newClient().GetServerCredentials(ctx, d.VMUUID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(creds.IPv4) == "" {
+		return "", fmt.Errorf("cloudblast: server %s has no IPv4 address: IPv6-only is not supported", d.VMUUID)
+	}
+	d.BaseDriver.IPAddress = creds.IPv4
+	return creds.IPv4, nil
 }
 
 // GetURL returns a Docker-compatible URL.
@@ -127,29 +151,73 @@ func (d *Driver) GetURL() (string, error) {
 	return fmt.Sprintf("tcp://%s:2376", ip), nil
 }
 
-// Create is implemented in US1 (T023-T028).
-func (d *Driver) Create() error { return notImplemented("Create") }
-
-// Remove is implemented in US1 (T027).
-func (d *Driver) Remove() error { return notImplemented("Remove") }
-
-// GetState is implemented in US3 (T040).
+// GetState maps the CloudBlast status endpoint to a docker-machine state.
 func (d *Driver) GetState() (state.State, error) {
-	return state.Error, notImplemented("GetState")
+	if strings.TrimSpace(d.VMUUID) == "" {
+		return state.None, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiOperationTimeout)
+	defer cancel()
+
+	st, err := d.newClient().GetServerStatus(ctx, d.VMUUID)
+	if err != nil {
+		if IsNotFound(err) {
+			return state.None, nil
+		}
+		return state.Error, err
+	}
+	return MapState(st.State, st.ServerStatus)
 }
 
-// Start is implemented in US3 (T039).
-func (d *Driver) Start() error { return notImplemented("Start") }
+// Start powers the server on.
+func (d *Driver) Start() error { return d.powerAction("start", false) }
 
-// Stop is implemented in US3 (T039).
-func (d *Driver) Stop() error { return notImplemented("Stop") }
+// Stop gracefully shuts the server down.
+func (d *Driver) Stop() error { return d.powerAction("shutdown", true) }
 
-// Restart is implemented in US3 (T039).
-func (d *Driver) Restart() error { return notImplemented("Restart") }
+// Restart reboots the server.
+func (d *Driver) Restart() error { return d.powerAction("restart", false) }
 
-// Kill is implemented in US3 (T039).
-func (d *Driver) Kill() error { return notImplemented("Kill") }
+// Kill forcefully stops the server (not an alias for Stop).
+func (d *Driver) Kill() error { return d.powerAction("kill", true) }
 
-func notImplemented(op string) error {
-	return fmt.Errorf("%w: %s", ErrPhase2NotImplemented, op)
+func (d *Driver) powerAction(action string, missingOK bool) error {
+	if strings.TrimSpace(d.VMUUID) == "" {
+		if missingOK {
+			return nil
+		}
+		return errors.New("cloudblast: machine has no server yet")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), apiOperationTimeout)
+	defer cancel()
+
+	err := d.newClient().ServerAction(ctx, d.VMUUID, action)
+	if err != nil && missingOK && IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// newClient builds an API client, using the test HTTP client when injected.
+func (d *Driver) newClient() *Client {
+	client := NewClient(d.APIBaseURL, d.Token, d.APIInsecure)
+	if d.httpClient != nil {
+		client.HTTPClient = d.httpClient
+	}
+	return client
+}
+
+func (d *Driver) pollEvery() time.Duration {
+	if d.pollInterval > 0 {
+		return d.pollInterval
+	}
+	return defaultPollInterval
+}
+
+func (d *Driver) readyTimeout() time.Duration {
+	seconds := d.WaitTimeoutSecs
+	if seconds <= 0 {
+		seconds = defaultWaitTimeoutSecs
+	}
+	return time.Duration(seconds) * time.Second
 }
