@@ -23,14 +23,17 @@ const (
 	maxWaitTimeoutSecs     = 3600
 	defaultHostnamePrefix  = "cb-"
 
-	defaultPollInterval     = 5 * time.Second
-	compensationTimeout     = 3 * time.Minute
-	removalTimeout          = 5 * time.Minute
-	apiOperationTimeout     = 2 * time.Minute
-	keyCleanupTimeout       = 30 * time.Second
-	sshHandshakeMinTimeout  = 10 * time.Minute
-	postBootScriptTimeout   = 10 * time.Minute
-	bootFinishedWaitTimeout = 5 * time.Minute
+	defaultPollInterval            = 5 * time.Second
+	compensationTimeout            = 3 * time.Minute
+	removalTimeout                 = 5 * time.Minute
+	apiOperationTimeout            = 2 * time.Minute
+	keyCleanupTimeout              = 30 * time.Second
+	sshHandshakeMinTimeout         = 10 * time.Minute
+	bootFinishedWaitTimeout        = 5 * time.Minute
+	bootFinishedProgressInterval   = 30 * time.Second
+	defaultBootFinishedTimeoutSecs = 1200
+	minBootFinishedTimeoutSecs     = 60
+	maxBootFinishedTimeoutSecs     = 3600
 )
 
 // Driver is the CloudBlast node driver state. Fields are persisted in the
@@ -49,12 +52,14 @@ type Driver struct {
 	PlanID       int    `json:"planId,omitempty"`
 	TemplateSlug string `json:"templateSlug,omitempty"`
 
-	VMUUID            string `json:"vmUuid,omitempty"`
-	SSHKeyID          int    `json:"sshKeyId,omitempty"`
-	SSHKeyFingerprint string `json:"sshKeyFingerprint,omitempty"`
-	WaitTimeoutSecs   int    `json:"waitTimeoutSecs,omitempty"`
-	KeepIPs           bool   `json:"keepIps,omitempty"`
-	HostnamePrefix    string `json:"hostnamePrefix,omitempty"`
+	VMUUID                  string `json:"vmUuid,omitempty"`
+	SSHKeyID                int    `json:"sshKeyId,omitempty"`
+	SSHKeyFingerprint       string `json:"sshKeyFingerprint,omitempty"`
+	WaitTimeoutSecs         int    `json:"waitTimeoutSecs,omitempty"`
+	WaitBootFinished        bool   `json:"waitBootFinished"`
+	BootFinishedTimeoutSecs int    `json:"bootFinishedTimeout,omitempty"`
+	KeepIPs                 bool   `json:"keepIps,omitempty"`
+	HostnamePrefix          string `json:"hostnamePrefix,omitempty"`
 
 	// test seams; never persisted
 	httpClient   *http.Client  `json:"-"`
@@ -72,9 +77,11 @@ func NewDriver(hostName, storePath string) *Driver {
 			SSHUser:     defaultSSHUser,
 			SSHPort:     defaultSSHPort,
 		},
-		APIBaseURL:      DefaultAPIBaseURL,
-		WaitTimeoutSecs: defaultWaitTimeoutSecs,
-		HostnamePrefix:  defaultHostnamePrefix,
+		APIBaseURL:              DefaultAPIBaseURL,
+		WaitTimeoutSecs:         defaultWaitTimeoutSecs,
+		WaitBootFinished:        true,
+		BootFinishedTimeoutSecs: defaultBootFinishedTimeoutSecs,
+		HostnamePrefix:          defaultHostnamePrefix,
 	}
 }
 
@@ -104,6 +111,9 @@ func (d *Driver) PreCreateCheck() error {
 		return err
 	}
 	if err := validateBaseURL(d.APIBaseURL); err != nil {
+		return err
+	}
+	if err := validateBootFinishedTimeout(d.BootFinishedTimeoutSecs); err != nil {
 		return err
 	}
 	return nil

@@ -59,7 +59,7 @@ func readPostBootScriptFile(path string) ([]byte, error) {
 // phase (boot-finished probe, upload, run, cleanup) retries on SSH drops until
 // max(WaitTimeoutSecs, 10m) expires; Rancher's install.sh runs separately after
 // Create returns.
-func (d *Driver) runPostBootScript(ctx context.Context, ip string, script []byte) error {
+func (d *Driver) runPostBootScript(ctx context.Context, ip string, script []byte, skipBootWait bool) error {
 	timeout := d.sshWaitTimeout()
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -80,6 +80,10 @@ func (d *Driver) runPostBootScript(ctx context.Context, ip string, script []byte
 
 	probeDeadline := time.Now().Add(bootFinishedWaitTimeout)
 	step := stepBootFinished
+	if skipBootWait {
+		d.debugf("boot-finished already awaited before the post-boot script; skipping probe")
+		step = stepUpload
+	}
 	drops := 0
 
 	for {
@@ -184,9 +188,7 @@ func (d *Driver) reconnectPostBoot(ctx context.Context, cfg SSHConfig, client *S
 		}
 		return fmt.Errorf("cloudblast: post-boot reconnect failed at %s (attempt %d): %w", step, drops, err)
 	}
-	client.client = reconnected.client
-	client.runFunc = reconnected.runFunc
-	client.writeFunc = reconnected.writeFunc
+	adoptSSHClient(client, reconnected)
 	return nil
 }
 

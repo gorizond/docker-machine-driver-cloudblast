@@ -90,8 +90,11 @@ func (d *Driver) Create() (err error) {
 	}
 	d.BaseDriver.IPAddress = creds.IPv4
 
+	if d.WaitBootFinished {
+		d.waitForBootFinished(creds.IPv4, d.bootFinishedTimeout())
+	}
 	if len(script) > 0 {
-		if err := d.runPostBootScript(context.Background(), creds.IPv4, script); err != nil {
+		if err := d.runPostBootScript(context.Background(), creds.IPv4, script, d.WaitBootFinished); err != nil {
 			return err
 		}
 	}

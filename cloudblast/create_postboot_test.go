@@ -30,6 +30,7 @@ func readyAPI(method, path string) (*http.Response, error) {
 func TestCreateWithoutPostBootScriptSkipsSSH(t *testing.T) {
 	transport := &fakeTransport{route: readyAPI}
 	d := newUS1Driver(t, transport)
+	d.WaitBootFinished = false
 
 	restore := waitForSSHFunc
 	defer func() { waitForSSHFunc = restore }()
@@ -49,6 +50,7 @@ func TestCreateWithoutPostBootScriptSkipsSSH(t *testing.T) {
 func TestCreateEmptyPostBootScriptIsNoOp(t *testing.T) {
 	transport := &fakeTransport{route: readyAPI}
 	d := newUS1Driver(t, transport)
+	d.WaitBootFinished = false
 	d.PostBootScript = "   "
 
 	restore := waitForSSHFunc
@@ -77,6 +79,7 @@ func TestCreatePostBootScriptFailureCompensates(t *testing.T) {
 		}
 	}}
 	d := newUS1Driver(t, transport)
+	d.WaitBootFinished = false
 	d.PostBootScript = "exit 7"
 
 	uploads := map[string]string{}

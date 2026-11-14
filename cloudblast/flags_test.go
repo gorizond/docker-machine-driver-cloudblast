@@ -42,6 +42,7 @@ var cloudblastEnv = []string{
 	"CLOUDBLAST_LOCATION_ID", "CLOUDBLAST_PLAN_ID", "CLOUDBLAST_TEMPLATE_SLUG",
 	"CLOUDBLAST_POST_BOOT_SCRIPT", "CLOUDBLAST_SSH_USER", "CLOUDBLAST_SSH_PORT",
 	"CLOUDBLAST_WAIT_TIMEOUT", "CLOUDBLAST_KEEP_IPS", "CLOUDBLAST_HOSTNAME_PREFIX",
+	"CLOUDBLAST_WAIT_BOOT_FINISHED", "CLOUDBLAST_BOOT_FINISHED_TIMEOUT",
 }
 
 func clearCloudblastEnv(t *testing.T) {
@@ -72,6 +73,12 @@ func TestSetConfigFromFlagsDefaults(t *testing.T) {
 	if d.KeepIPs {
 		t.Fatal("keep-ips default must be false")
 	}
+	if !d.WaitBootFinished {
+		t.Fatal("wait-boot-finished default must be true")
+	}
+	if d.BootFinishedTimeoutSecs != 1200 {
+		t.Fatalf("boot-finished timeout = %d, want 1200", d.BootFinishedTimeoutSecs)
+	}
 }
 
 func TestSetConfigFromFlagsEnvFallback(t *testing.T) {
@@ -84,6 +91,8 @@ func TestSetConfigFromFlagsEnvFallback(t *testing.T) {
 	t.Setenv("CLOUDBLAST_WAIT_TIMEOUT", "900")
 	t.Setenv("CLOUDBLAST_KEEP_IPS", "true")
 	t.Setenv("CLOUDBLAST_HOSTNAME_PREFIX", "env-")
+	t.Setenv("CLOUDBLAST_WAIT_BOOT_FINISHED", "false")
+	t.Setenv("CLOUDBLAST_BOOT_FINISHED_TIMEOUT", "900")
 
 	d := NewDriver("m", t.TempDir())
 	if err := d.SetConfigFromFlags(fakeOptions{}); err != nil {
@@ -97,6 +106,12 @@ func TestSetConfigFromFlagsEnvFallback(t *testing.T) {
 	}
 	if d.PostBootScript != "echo post-boot" {
 		t.Fatalf("post-boot script = %q", d.PostBootScript)
+	}
+	if d.WaitBootFinished {
+		t.Fatal("wait-boot-finished env false not applied")
+	}
+	if d.BootFinishedTimeoutSecs != 900 {
+		t.Fatalf("boot-finished timeout = %d, want 900", d.BootFinishedTimeoutSecs)
 	}
 	if !d.KeepIPs || d.HostnamePrefix != "env-" {
 		t.Fatalf("env bool/string not applied: %+v", d)
@@ -119,6 +134,7 @@ func TestCreateFlagsContract(t *testing.T) {
 		"cloudblast-location-id", "cloudblast-plan-id", "cloudblast-template-slug",
 		"cloudblast-post-boot-script", "cloudblast-ssh-user", "cloudblast-ssh-port",
 		"cloudblast-wait-timeout", "cloudblast-keep-ips", "cloudblast-hostname-prefix",
+		"cloudblast-wait-boot-finished", "cloudblast-boot-finished-timeout",
 	}
 	forbidden := []string{"user-data", "userdata", "custom-data", "cloud-config"}
 	have := map[string]bool{}
@@ -153,6 +169,8 @@ func TestPreCreateCheck(t *testing.T) {
 		{name: "timeout too small", mutate: func(d *Driver) { d.WaitTimeoutSecs = 30 }, wantErr: "between 60 and 3600"},
 		{name: "timeout too big", mutate: func(d *Driver) { d.WaitTimeoutSecs = 3601 }, wantErr: "between 60 and 3600"},
 		{name: "bad base url", mutate: func(d *Driver) { d.APIBaseURL = "console.cloudblast.io" }, wantErr: "invalid cloudblast-base-url"},
+		{name: "boot timeout too small", mutate: func(d *Driver) { d.BootFinishedTimeoutSecs = 30 }, wantErr: "between 60 and 3600"},
+		{name: "boot timeout too big", mutate: func(d *Driver) { d.BootFinishedTimeoutSecs = 3601 }, wantErr: "between 60 and 3600"},
 	}
 
 	for _, tc := range cases {

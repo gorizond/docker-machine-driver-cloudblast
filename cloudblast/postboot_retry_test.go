@@ -82,7 +82,7 @@ func TestPostBootReconnectsAfterProbeDrop(t *testing.T) {
 		return second.ssh(), nil
 	}
 
-	if err := d.runPostBootScript(context.Background(), "fake", []byte("echo hi")); err != nil {
+	if err := d.runPostBootScript(context.Background(), "fake", []byte("echo hi"), false); err != nil {
 		t.Fatalf("runPostBootScript: %v", err)
 	}
 	if connects != 2 {
@@ -113,7 +113,7 @@ func TestPostBootReconnectsAfterUploadDrop(t *testing.T) {
 		return second.ssh(), nil
 	}
 
-	if err := d.runPostBootScript(context.Background(), "fake", []byte("echo hi")); err != nil {
+	if err := d.runPostBootScript(context.Background(), "fake", []byte("echo hi"), false); err != nil {
 		t.Fatalf("runPostBootScript: %v", err)
 	}
 	if connects != 2 || first.uploads != 1 || second.uploads != 1 {
@@ -150,7 +150,7 @@ func TestPostBootReconnectsAndRetriesRunAfterDrop(t *testing.T) {
 		return second.ssh(), nil
 	}
 
-	if err := d.runPostBootScript(context.Background(), "fake", []byte("echo hi")); err != nil {
+	if err := d.runPostBootScript(context.Background(), "fake", []byte("echo hi"), false); err != nil {
 		t.Fatalf("runPostBootScript: %v", err)
 	}
 	if connects != 2 || first.uploads != 1 || second.uploads != 0 {
@@ -183,7 +183,7 @@ func TestPostBootPersistentDropsTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
 
-	err := d.runPostBootScript(ctx, "fake", []byte("echo hi"))
+	err := d.runPostBootScript(ctx, "fake", []byte("echo hi"), false)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}

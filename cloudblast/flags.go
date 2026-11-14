@@ -48,6 +48,17 @@ func (d *Driver) GetCreateFlags() []mcnflag.Flag {
 			Usage:  "CloudBlast OS template slug (e.g. ubuntu-24.04)",
 			EnvVar: "CLOUDBLAST_TEMPLATE_SLUG",
 		},
+		mcnflag.BoolFlag{
+			Name:   "cloudblast-wait-boot-finished",
+			Usage:  "Wait for /var/lib/cloud/instance/boot-finished before Create returns (default true; disable with CLOUDBLAST_WAIT_BOOT_FINISHED=false)",
+			EnvVar: "CLOUDBLAST_WAIT_BOOT_FINISHED",
+		},
+		mcnflag.IntFlag{
+			Name:   "cloudblast-boot-finished-timeout",
+			Usage:  "Provider boot-finished timeout in seconds (60-3600)",
+			EnvVar: "CLOUDBLAST_BOOT_FINISHED_TIMEOUT",
+			Value:  defaultBootFinishedTimeoutSecs,
+		},
 		mcnflag.StringFlag{
 			Name:   "cloudblast-post-boot-script",
 			Usage:  "Optional script to run over SSH after the server is ready (path, @path or inline)",
@@ -95,6 +106,7 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 	d.PostBootScript = stringOpt(opts, "cloudblast-post-boot-script", "CLOUDBLAST_POST_BOOT_SCRIPT", "")
 	d.HostnamePrefix = stringOpt(opts, "cloudblast-hostname-prefix", "CLOUDBLAST_HOSTNAME_PREFIX", defaultHostnamePrefix)
 	d.KeepIPs = boolOpt(opts, "cloudblast-keep-ips", "CLOUDBLAST_KEEP_IPS")
+	d.WaitBootFinished = boolOptDefault(opts, "cloudblast-wait-boot-finished", "CLOUDBLAST_WAIT_BOOT_FINISHED", true)
 	d.SSHUser = stringOpt(opts, "cloudblast-ssh-user", "CLOUDBLAST_SSH_USER", defaultSSHUser)
 
 	var err error
@@ -108,6 +120,9 @@ func (d *Driver) SetConfigFromFlags(opts drivers.DriverOptions) error {
 		return err
 	}
 	if d.WaitTimeoutSecs, err = intOpt(opts, "cloudblast-wait-timeout", "CLOUDBLAST_WAIT_TIMEOUT", defaultWaitTimeoutSecs); err != nil {
+		return err
+	}
+	if d.BootFinishedTimeoutSecs, err = intOpt(opts, "cloudblast-boot-finished-timeout", "CLOUDBLAST_BOOT_FINISHED_TIMEOUT", defaultBootFinishedTimeoutSecs); err != nil {
 		return err
 	}
 
@@ -140,6 +155,21 @@ func intOpt(opts drivers.DriverOptions, name, env string, def int) (int, error) 
 	return def, nil
 }
 
+// boolOptDefault supports flags whose default is true. mcnflag has no bool
+// default and DriverOptions cannot distinguish "unset" from "false", so an
+// explicit false is only possible through the environment variable.
+func boolOptDefault(opts drivers.DriverOptions, name, env string, def bool) bool {
+	if raw := strings.TrimSpace(os.Getenv(env)); raw != "" {
+		if v, err := strconv.ParseBool(raw); err == nil {
+			return v
+		}
+	}
+	if opts.Bool(name) {
+		return true
+	}
+	return def
+}
+
 func boolOpt(opts drivers.DriverOptions, name, env string) bool {
 	if opts.Bool(name) {
 		return true
@@ -155,6 +185,13 @@ func boolOpt(opts drivers.DriverOptions, name, env string) bool {
 func validateWaitTimeout(seconds int) error {
 	if seconds < minWaitTimeoutSecs || seconds > maxWaitTimeoutSecs {
 		return fmt.Errorf("cloudblast-wait-timeout must be between %d and %d seconds", minWaitTimeoutSecs, maxWaitTimeoutSecs)
+	}
+	return nil
+}
+
+func validateBootFinishedTimeout(seconds int) error {
+	if seconds < minBootFinishedTimeoutSecs || seconds > maxBootFinishedTimeoutSecs {
+		return fmt.Errorf("cloudblast-boot-finished-timeout must be between %d and %d seconds", minBootFinishedTimeoutSecs, maxBootFinishedTimeoutSecs)
 	}
 	return nil
 }
