@@ -90,7 +90,13 @@ func TestApplyHostnameWritesPreserveConfigAndHostsFile(t *testing.T) {
 	if fake.perms[etcHostnamePath] != 0o644 {
 		t.Fatalf("/etc/hostname mode = %04o", fake.perms[etcHostnamePath])
 	}
-	if len(fake.runs) != 1 || fake.runs[0] != "hostnamectl set-hostname 'cb-live-node'" {
+	if got, want := fake.writes[hostnameUnitPath], hostnameUnitContent("cb-live-node"); got != want {
+		t.Fatalf("unit content = %q, want %q", got, want)
+	}
+	if fake.perms[hostnameUnitPath] != 0o644 {
+		t.Fatalf("unit mode = %04o", fake.perms[hostnameUnitPath])
+	}
+	if len(fake.runs) != 2 || fake.runs[0] != "hostnamectl set-hostname 'cb-live-node'" || fake.runs[1] != hostnameUnitEnableCmd {
 		t.Fatalf("commands = %v", fake.runs)
 	}
 
@@ -98,7 +104,7 @@ func TestApplyHostnameWritesPreserveConfigAndHostsFile(t *testing.T) {
 	if err := d.applyHostname(context.Background(), client, "cb-live-node"); err != nil {
 		t.Fatalf("second applyHostname: %v", err)
 	}
-	if fake.writes[preserveHostnamePath] != preserveHostnameConfig || len(fake.runs) != 2 {
+	if fake.writes[preserveHostnamePath] != preserveHostnameConfig || len(fake.runs) != 4 {
 		t.Fatalf("second apply not idempotent: writes=%v runs=%v", fake.writes, fake.runs)
 	}
 }
@@ -120,8 +126,94 @@ func TestApplyHostnameFallsBackToHostnameCommand(t *testing.T) {
 	if err := d.applyHostname(context.Background(), client, "cb-live-node"); err != nil {
 		t.Fatalf("applyHostname: %v", err)
 	}
-	if len(runs) != 2 || runs[0] != "hostnamectl set-hostname 'cb-live-node'" || runs[1] != "hostname 'cb-live-node'" {
-		t.Fatalf("commands = %v", runs)
+	want := []string{
+		"hostnamectl set-hostname 'cb-live-node'",
+		"hostname 'cb-live-node'",
+		hostnameUnitEnableCmd,
+	}
+	if len(runs) != len(want) {
+		t.Fatalf("commands = %v, want %v", runs, want)
+	}
+	for i := range want {
+		if runs[i] != want[i] {
+			t.Fatalf("commands = %v, want %v", runs, want)
+		}
+	}
+}
+
+func TestHostnameUnitContent(t *testing.T) {
+	content := hostnameUnitContent("cb-live-node")
+	wants := []string{
+		"[Unit]",
+		"Description=CloudBlast persistent hostname",
+		"After=cloud-init.target network-online.target",
+		"Wants=network-online.target",
+		"[Service]",
+		"Type=oneshot",
+		`ExecStart=/bin/sh -c 'hostnamectl set-hostname cb-live-node 2>/dev/null || hostname cb-live-node; printf "%s\n" cb-live-node > /etc/hostname'`,
+		"RemainAfterExit=yes",
+		"[Install]",
+		"WantedBy=multi-user.target",
+	}
+	for _, want := range wants {
+		if !strings.Contains(content, want) {
+			t.Fatalf("unit content missing %q:\n%s", want, content)
+		}
+	}
+	if got := strings.Count(content, "cb-live-node"); got != 3 {
+		t.Fatalf("hostname occurrences = %d, want 3", got)
+	}
+	if strings.Contains(content, "%!s") {
+		t.Fatalf("unit content has a formatting error:\n%s", content)
+	}
+}
+
+func TestHostnameUnitRejectsInjection(t *testing.T) {
+	bad := []string{
+		"evil'; touch /tmp/pwned; '",
+		"two words",
+		"line\nbreak",
+		strings.Repeat("a", 65),
+		"-leading-hyphen",
+		"trailing-hyphen-",
+		"double..dot",
+	}
+	for _, name := range bad {
+		if isValidHostname(name) {
+			t.Fatalf("invalid hostname %q accepted", name)
+		}
+		if err := NewDriver("m", "").persistHostname(context.Background(), nil, SSHConfig{}, name); err == nil {
+			t.Fatalf("persistHostname accepted %q", name)
+		}
+	}
+	for _, name := range []string{"cb-live-node", "a", "cb-live-node.example.com"} {
+		if !isValidHostname(name) {
+			t.Fatalf("valid hostname %q rejected", name)
+		}
+	}
+}
+
+func TestApplyHostnameSystemdUnavailableDoesNotFail(t *testing.T) {
+	d := NewDriver("machine-1", "")
+	writes := map[string]string{}
+	client := &SSHClient{
+		writeFunc: func(_ context.Context, path string, content []byte, _ os.FileMode) error {
+			writes[path] = string(content)
+			return nil
+		},
+		runFunc: func(_ context.Context, cmd string) (string, error) {
+			if strings.HasPrefix(cmd, "systemctl") {
+				return "", errors.New("System has not been booted with systemd as init system")
+			}
+			return "", nil
+		},
+	}
+
+	if err := d.applyHostname(context.Background(), client, "cb-live-node"); err != nil {
+		t.Fatalf("systemd absence must not fail: %v", err)
+	}
+	if _, ok := writes[hostnameUnitPath]; !ok {
+		t.Fatal("unit must still be written before systemd is attempted")
 	}
 }
 
