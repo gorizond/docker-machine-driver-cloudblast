@@ -55,7 +55,10 @@ func LoadPrivateKey(path string) (ssh.Signer, error) {
 }
 
 // WaitForSSH retries the TCP+SSH handshake until the node accepts the key or
-// the timeout expires. Authentication failures are returned immediately.
+// the timeout expires. Authentication failures are retried too: CloudBlast
+// injects the registered key via its own cloud-init after boot, so publickey
+// auth can transiently fail on the first attempts. Key-file and configuration
+// errors are fatal and abort immediately.
 func WaitForSSH(ctx context.Context, cfg SSHConfig) (*SSHClient, error) {
 	if strings.TrimSpace(cfg.Host) == "" {
 		return nil, errors.New("cloudblast ssh: host is required")
@@ -89,25 +92,28 @@ func WaitForSSH(ctx context.Context, cfg SSHConfig) (*SSHClient, error) {
 	}
 
 	var lastErr error
+	attempt := 0
 	for {
-		client, dialErr := dialSSH(waitCtx, address, config)
+		attempt++
+		client, dialErr := dialSSHFunc(waitCtx, address, config)
 		if dialErr == nil {
-			log.Debugf("cloudblast ssh: connected to %s@%s", cfg.User, address)
+			log.Debugf("cloudblast ssh: connected to %s@%s after %d attempt(s)", cfg.User, address, attempt)
 			return &SSHClient{client: client}, nil
 		}
 		lastErr = dialErr
-		if isAuthFailure(dialErr) {
-			return nil, fmt.Errorf("cloudblast ssh: authentication to %s failed: %w", address, dialErr)
-		}
-		log.Debugf("cloudblast ssh: waiting for %s: %v", address, dialErr)
+		log.Debugf("cloudblast ssh: attempt %d for %s failed: %s", attempt, address, sshFailureReason(dialErr))
 
 		select {
 		case <-waitCtx.Done():
-			return nil, fmt.Errorf("cloudblast ssh: handshake with %s timed out after %s: %w", address, cfg.Timeout, lastErr)
+			return nil, fmt.Errorf("cloudblast ssh: handshake with %s timed out after %s (%d attempts): %w",
+				address, cfg.Timeout, attempt, lastErr)
 		case <-time.After(cfg.RetryInterval):
 		}
 	}
 }
+
+// dialSSHFunc is a test seam; production code uses dialSSH.
+var dialSSHFunc = dialSSH
 
 func dialSSH(ctx context.Context, address string, config *ssh.ClientConfig) (*ssh.Client, error) {
 	dialer := &net.Dialer{Timeout: sshHandshakeTimeout}
@@ -131,6 +137,19 @@ func isAuthFailure(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unable to authenticate") || strings.Contains(msg, "no supported methods remain")
+}
+
+// sshFailureReason classifies an attempt error for debug logging. It never
+// contains key material: handshake errors only carry method names.
+func sshFailureReason(err error) string {
+	if isAuthFailure(err) {
+		return "authentication not ready yet (key may not be injected)"
+	}
+	msg := strings.TrimSpace(err.Error())
+	if len(msg) > 160 {
+		msg = msg[:160] + "…"
+	}
+	return msg
 }
 
 // Run executes a command and returns combined stdout/stderr. Output is masked.
