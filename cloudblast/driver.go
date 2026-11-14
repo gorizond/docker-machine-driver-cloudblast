@@ -31,6 +31,7 @@ const (
 	sshHandshakeMinTimeout    = 10 * time.Minute
 	cloudInitMinTimeout       = 15 * time.Minute
 	cloudConfigApplyTimeout   = 5 * time.Minute
+	hostnameApplyTimeout      = 2 * time.Minute
 	cloudInitProgressInterval = 30 * time.Second
 )
 

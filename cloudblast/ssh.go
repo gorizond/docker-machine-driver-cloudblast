@@ -36,8 +36,9 @@ type SSHConfig struct {
 // SSHClient is a small command runner over one SSH connection.
 type SSHClient struct {
 	client *ssh.Client
-	// runFunc is a test seam; production code uses client.
-	runFunc func(context.Context, string) (string, error)
+	// runFunc and writeFunc are test seams; production code uses client.
+	runFunc   func(context.Context, string) (string, error)
+	writeFunc func(context.Context, string, []byte, os.FileMode) error
 }
 
 // LoadPrivateKey reads an unencrypted OpenSSH/PEM private key.
@@ -167,6 +168,9 @@ func (c *SSHClient) Run(ctx context.Context, cmd string) (string, error) {
 func (c *SSHClient) WriteFile(ctx context.Context, path string, content []byte, perm os.FileMode) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("cloudblast ssh: path is required")
+	}
+	if c != nil && c.writeFunc != nil {
+		return c.writeFunc(ctx, path, content, perm)
 	}
 	dir := path[:strings.LastIndex(path, "/")+1]
 	if dir == "" {

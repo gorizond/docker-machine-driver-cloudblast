@@ -196,6 +196,20 @@ func (c *SSHClient) drop() {
 	}
 	c.client = nil
 	c.runFunc = nil
+	c.writeFunc = nil
+}
+
+// Reconnect closes the current connection and dials again with the same config.
+func (c *SSHClient) Reconnect(ctx context.Context, cfg SSHConfig) error {
+	c.drop()
+	reconnected, err := waitForSSHFunc(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	c.client = reconnected.client
+	c.runFunc = reconnected.runFunc
+	c.writeFunc = reconnected.writeFunc
+	return nil
 }
 
 type cloudInitStatusPayload struct {

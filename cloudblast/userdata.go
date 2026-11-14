@@ -95,6 +95,18 @@ func (u *UserData) HasPackages() bool {
 	return ok && len(list) > 0
 }
 
+// Hostname returns the desired hostname from the merged cloud-config, if any.
+func (u *UserData) Hostname() string {
+	if u == nil {
+		return ""
+	}
+	value, ok := u.Config["hostname"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
 // HasUsers reports whether the config creates users or injects authorized keys.
 func (u *UserData) HasUsers() bool {
 	if u == nil {
