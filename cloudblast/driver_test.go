@@ -227,6 +227,23 @@ func TestWaitServerReadyFailsFastOnInstallFailed(t *testing.T) {
 	}
 }
 
+func TestProvisioningTimeouts(t *testing.T) {
+	d := NewDriver("m", "")
+	if got := d.cloudInitTimeout(); got != 15*time.Minute {
+		t.Fatalf("default cloud-init timeout = %s, want 15m", got)
+	}
+	if got := d.sshWaitTimeout(); got != 10*time.Minute {
+		t.Fatalf("default SSH timeout = %s, want 10m", got)
+	}
+	d.WaitTimeoutSecs = 1200
+	if got := d.cloudInitTimeout(); got != 20*time.Minute {
+		t.Fatalf("cloud-init timeout with 1200s = %s, want 20m", got)
+	}
+	if got := d.sshWaitTimeout(); got != 20*time.Minute {
+		t.Fatalf("SSH timeout with 1200s = %s, want 20m", got)
+	}
+}
+
 func TestHostnameTruncationIsDeterministic(t *testing.T) {
 	longName := strings.Repeat("a", 300)
 	d := NewDriver(longName, "")

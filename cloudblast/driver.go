@@ -23,11 +23,15 @@ const (
 	maxWaitTimeoutSecs     = 3600
 	defaultHostnamePrefix  = "cb-"
 
-	defaultPollInterval = 5 * time.Second
-	compensationTimeout = 3 * time.Minute
-	removalTimeout      = 5 * time.Minute
-	apiOperationTimeout = 2 * time.Minute
-	keyCleanupTimeout   = 30 * time.Second
+	defaultPollInterval       = 5 * time.Second
+	compensationTimeout       = 3 * time.Minute
+	removalTimeout            = 5 * time.Minute
+	apiOperationTimeout       = 2 * time.Minute
+	keyCleanupTimeout         = 30 * time.Second
+	sshHandshakeMinTimeout    = 10 * time.Minute
+	cloudInitMinTimeout       = 15 * time.Minute
+	cloudConfigApplyTimeout   = 5 * time.Minute
+	cloudInitProgressInterval = 30 * time.Second
 )
 
 // Driver is the CloudBlast node driver state. Fields are persisted in the

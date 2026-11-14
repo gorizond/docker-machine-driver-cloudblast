@@ -161,13 +161,44 @@ func (c *Client) GetServerCredentials(ctx context.Context, uuid string) (*Creden
 }
 
 // DeleteServer deletes a server. A missing server is treated as success.
+// CloudBlast expects keep_ips to be a comma-separated list of the server's own
+// addresses (not a boolean), so when keepIPs is false the parameter is omitted.
 func (c *Client) DeleteServer(ctx context.Context, uuid string, keepIPs bool) error {
-	query := url.Values{"keep_ips": []string{strconv.FormatBool(keepIPs)}}
+	var query url.Values
+	if keepIPs {
+		server, err := c.GetServer(ctx, uuid)
+		if err != nil {
+			if IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if addresses := serverAddresses(server); len(addresses) > 0 {
+			query = url.Values{"keep_ips": []string{strings.Join(addresses, ",")}}
+		}
+	}
 	_, _, err := c.do(ctx, http.MethodDelete, "/servers/"+url.PathEscape(uuid), query, nil)
 	if err != nil && !IsNotFound(err) {
 		return err
 	}
 	return nil
+}
+
+// serverAddresses returns unique non-empty addresses in API order.
+func serverAddresses(server *Server) []string {
+	if server == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(server.IPAddresses))
+	addresses := make([]string, 0, len(server.IPAddresses))
+	for _, addr := range server.IPAddresses {
+		if addr.Address == "" || seen[addr.Address] {
+			continue
+		}
+		seen[addr.Address] = true
+		addresses = append(addresses, addr.Address)
+	}
+	return addresses
 }
 
 // validActions is the power action surface documented for POST /servers/{uuid}/actions.

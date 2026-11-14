@@ -156,16 +156,54 @@ func (c *SSHClient) WriteFile(ctx context.Context, path string, content []byte, 
 	return nil
 }
 
+// RunWithProgress runs a command and calls progress every interval while it is
+// executing. Used to log long cloud-init waits without leaking command output.
+func (c *SSHClient) RunWithProgress(ctx context.Context, cmd string, interval time.Duration, progress func(elapsed time.Duration)) (string, error) {
+	if progress == nil || interval <= 0 {
+		return c.Run(ctx, cmd)
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		start := time.Now()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				progress(time.Since(start))
+			}
+		}
+	}()
+	out, err := c.Run(ctx, cmd)
+	close(done)
+	return out, err
+}
+
 // WaitCloudInit waits for the provider cloud-init to finish, so package
-// installation does not race with dpkg locks.
-func (c *SSHClient) WaitCloudInit(ctx context.Context, timeout time.Duration) error {
+// installation does not race with dpkg locks. If the boot-finished marker
+// already exists, cloud-init is considered complete. It never runs
+// "cloud-init clean" or "cloud-init init".
+func (c *SSHClient) WaitCloudInit(ctx context.Context, timeout time.Duration, progress func(elapsed time.Duration)) error {
 	if timeout <= 0 {
-		timeout = time.Duration(defaultWaitTimeoutSecs) * time.Second
+		timeout = cloudInitMinTimeout
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	out, err := c.Run(waitCtx, "cloud-init status --wait")
+	marker, err := c.Run(waitCtx, "test -f /var/lib/cloud/instance/boot-finished && echo yes || echo no")
+	if err != nil {
+		return fmt.Errorf("cloudblast: check cloud-init boot-finished: %w", err)
+	}
+	if strings.Contains(marker, "yes") {
+		log.Debugf("cloudblast ssh: boot-finished marker present, cloud-init already done")
+		return nil
+	}
+
+	out, err := c.RunWithProgress(waitCtx, "cloud-init status --wait", cloudInitProgressInterval, progress)
 	if err != nil {
 		return fmt.Errorf("cloudblast: cloud-init did not finish: %w", err)
 	}
