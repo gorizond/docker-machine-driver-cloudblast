@@ -91,7 +91,7 @@ func (d *Driver) Create() (err error) {
 	d.BaseDriver.IPAddress = creds.IPv4
 
 	if len(script) > 0 {
-		if err := d.runPostBootScript(creds.IPv4, script); err != nil {
+		if err := d.runPostBootScript(context.Background(), creds.IPv4, script); err != nil {
 			return err
 		}
 	}
